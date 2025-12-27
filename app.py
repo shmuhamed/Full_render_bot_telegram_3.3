@@ -4,7 +4,7 @@ import threading
 import time
 from flask import Flask, request, redirect, url_for, flash, jsonify, render_template_string
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from flask_admin import Admin
+from flask_admin import Admin, BaseView, expose
 from flask_admin.contrib.sqla import ModelView
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
@@ -12,8 +12,7 @@ import json
 import requests
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
-from wtforms import SelectField, StringField, FloatField, IntegerField, TextAreaField
-from flask_wtf import FlaskForm
+import uuid
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -307,6 +306,9 @@ with app.app_context():
                         color=['Черный', 'Белый', 'Серый', 'Синий'][(i+j) % 4],
                         engine_capacity=1.8 + (i * 0.3),
                         photo_url1='https://images.unsplash.com/photo-1549399542-7e3f8b79c341?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+                        photo_url2='https://images.unsplash.com/photo-1553440569-bcc63803a83d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+                        photo_url3='https://images.unsplash.com/photo-1555212697-194d092e3b8f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+                        photo_url4='https://images.unsplash.com/photo-1544636331-e26879cd4d9b?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
                         is_active=True
                     )
                     db.session.add(car)
@@ -326,67 +328,53 @@ login_manager.login_view = 'login'
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Форма для добавления автомобиля
-class AddCarForm(FlaskForm):
-    title = StringField('Название автомобиля')
-    description = TextAreaField('Описание')
-    price_usd = FloatField('Цена в USD')
-    brand_id = SelectField('Бренд', coerce=int)
-    model_id = SelectField('Модель', coerce=int)
-    year = IntegerField('Год выпуска')
-    mileage_km = IntegerField('Пробег (км)')
-    fuel_type = SelectField('Тип топлива', choices=[
-        ('Бензин', 'Бензин'),
-        ('Дизель', 'Дизель'),
-        ('Электричество', 'Электричество'),
-        ('Гибрид', 'Гибрид'),
-        ('Газ', 'Газ')
-    ])
-    transmission = SelectField('Коробка передач', choices=[
-        ('Автомат', 'Автомат'),
-        ('Механика', 'Механика'),
-        ('Вариатор', 'Вариатор'),
-        ('Робот', 'Робот')
-    ])
-    color = StringField('Цвет')
-    engine_capacity = FloatField('Объем двигателя (л)')
-    photo_url1 = StringField('Фото URL 1')
-    photo_url2 = StringField('Фото URL 2')
-    photo_url3 = StringField('Фото URL 3')
-    photo_url4 = StringField('Фото URL 4')
+# Кастомная страница для добавления авто
+class AddCarView(BaseView):
+    @expose('/')
+    def index(self):
+        with app.app_context():
+            brands = Brand.query.filter_by(is_active=True).all()
+            price_categories = PriceCategory.query.filter_by(is_active=True).all()
+            
+        return self.render('admin/add_car.html', 
+                          brands=brands,
+                          price_categories=price_categories)
 
 # ИСПРАВЛЕННЫЕ ModelView для админки
 class CarModelView(ModelView):
-    column_list = ['id', 'title', 'price_usd', 'brand', 'model', 'year', 'is_active']
+    column_list = ['id', 'title', 'price_usd', 'brand', 'model', 'year', 'price_category', 'is_active']
     column_searchable_list = ['title']
-    column_filters = ['year', 'is_active', 'price_usd']
+    column_filters = ['year', 'is_active', 'price_usd', 'brand', 'fuel_type']
     column_labels = {
         'price_usd': 'Цена ($)',
         'mileage_km': 'Пробег (км)',
         'brand': 'Бренд',
-        'model': 'Модель'
+        'model': 'Модель',
+        'price_category': 'Категория цены'
     }
     
-    # Правильные поля формы
+    # Правильные поля формы с 4 фото
     form_columns = ['title', 'description', 'price_usd', 'price_category', 'brand', 'model', 
                    'year', 'mileage_km', 'fuel_type', 'transmission', 'color', 
                    'engine_capacity', 'photo_url1', 'photo_url2', 'photo_url3', 'photo_url4', 'is_active']
     
-    # Разрешаем создание, редактирование, удаление
     can_create = True
     can_edit = True
     can_delete = True
     can_export = True
     can_view_details = True
     
-    # Упрощенные настройки формы
+    # Обновленные варианты топлива
     form_choices = {
         'fuel_type': [
             ('Бензин', 'Бензин'),
             ('Дизель', 'Дизель'),
+            ('Газ', 'Газ'),
             ('Электричество', 'Электричество'),
             ('Гибрид', 'Гибрид'),
-            ('Газ', 'Газ')
+            ('Гибрид (бензин-электричество)', 'Гибрид (бензин-электричество)'),
+            ('Гибрид (дизель-электричество)', 'Гибрид (дизель-электричество)'),
+            ('Газ/бензин', 'Газ/бензин')
         ],
         'transmission': [
             ('Автомат', 'Автомат'),
@@ -402,7 +390,9 @@ class CarModelView(ModelView):
             ('Красный', 'Красный'),
             ('Зеленый', 'Зеленый'),
             ('Желтый', 'Желтый'),
-            ('Серебристый', 'Серебристый')
+            ('Серебристый', 'Серебристый'),
+            ('Бежевый', 'Бежевый'),
+            ('Коричневый', 'Коричневый')
         ]
     }
     
@@ -426,6 +416,22 @@ class CarModelView(ModelView):
         'engine_capacity': {
             'label': 'Объем двигателя (л)',
             'description': 'Например: 2.0'
+        },
+        'photo_url1': {
+            'label': 'Фото 1 (URL)',
+            'description': 'Ссылка на главное фото'
+        },
+        'photo_url2': {
+            'label': 'Фото 2 (URL)',
+            'description': 'Ссылка на дополнительное фото'
+        },
+        'photo_url3': {
+            'label': 'Фото 3 (URL)',
+            'description': 'Ссылка на дополнительное фото'
+        },
+        'photo_url4': {
+            'label': 'Фото 4 (URL)',
+            'description': 'Ссылка на дополнительное фото'
         }
     }
     
@@ -455,22 +461,10 @@ class CarModelView(ModelView):
         }
     }
     
-    def create_form(self, obj=None):
-        form = super().create_form(obj)
-        # Динамически заполняем бренды
-        form.brand.choices = [(brand.id, brand.name) for brand in Brand.query.filter_by(is_active=True).all()]
-        # Динамически заполняем модели
-        form.model.choices = [(model.id, model.name) for model in CarModel.query.filter_by(is_active=True).all()]
-        return form
-    
-    def edit_form(self, obj=None):
-        form = super().edit_form(obj)
-        form.brand.choices = [(brand.id, brand.name) for brand in Brand.query.filter_by(is_active=True).all()]
-        if obj and obj.brand_id:
-            form.model.choices = [(model.id, model.name) for model in CarModel.query.filter_by(brand_id=obj.brand_id, is_active=True).all()]
-        else:
-            form.model.choices = [(model.id, model.name) for model in CarModel.query.filter_by(is_active=True).all()]
-        return form
+    # Динамическое обновление моделей в зависимости от бренда
+    def on_form_prefill(self, form, id):
+        if form.brand.data:
+            form.model.query = CarModel.query.filter_by(brand_id=form.brand.data.id)
     
     def on_model_change(self, form, model, is_created):
         # Автоматически определяем ценовую категорию
@@ -480,6 +474,10 @@ class CarModelView(ModelView):
                 if category.min_price_usd <= model.price_usd <= category.max_price_usd:
                     model.price_category_id = category.id
                     break
+        
+        # Если выбрана модель, обновляем title
+        if model.brand and model.model:
+            model.title = f"{model.brand.name} {model.model.name} {model.year}"
     
     def is_accessible(self):
         return current_user.is_authenticated and current_user.role == 'admin'
@@ -667,6 +665,11 @@ class UserModelView(ModelView):
 
 # Создаем админку
 admin = Admin(app, name='Suvtekin Auto', template_mode='bootstrap3', url='/admin')
+
+# Добавляем кастомную страницу для добавления авто
+admin.add_view(AddCarView(name='Добавить авто', endpoint='add-car', category='Действия'))
+
+# Добавляем остальные модели
 admin.add_view(CarModelView(Car, db.session, name='Автомобили', category='Авто'))
 admin.add_view(BrandModelView(Brand, db.session, name='Бренды', category='Справочники'))
 admin.add_view(CarModelModelView(CarModel, db.session, name='Модели', category='Справочники'))
@@ -675,6 +678,13 @@ admin.add_view(ManagerModelView(Manager, db.session, name='Менеджеры', 
 admin.add_view(OrderModelView(Order, db.session, name='Заказы', category='Заявки'))
 admin.add_view(SellRequestModelView(SellRequest, db.session, name='Заявки на продажу', category='Заявки'))
 admin.add_view(UserModelView(User, db.session, name='Пользователи', category='Система'))
+
+# API endpoint для получения моделей по бренду
+@app.route('/api/models/<int:brand_id>')
+@login_required
+def get_models_by_brand(brand_id):
+    models = CarModel.query.filter_by(brand_id=brand_id, is_active=True).all()
+    return jsonify([{'id': m.id, 'name': m.name} for m in models])
 
 # Роуты
 @app.route('/')
@@ -764,243 +774,7 @@ def logout():
     flash('Вы вышли из системы', 'success')
     return redirect(url_for('login'))
 
-# Добавление автомобиля через отдельную форму
-@app.route('/add-car', methods=['GET', 'POST'])
-@login_required
-def add_car():
-    if current_user.role != 'admin':
-        flash('Доступ запрещен', 'danger')
-        return redirect(url_for('index'))
-    
-    form = AddCarForm()
-    
-    # Заполняем бренды
-    form.brand_id.choices = [(brand.id, brand.name) for brand in Brand.query.filter_by(is_active=True).all()]
-    form.brand_id.choices.insert(0, (0, 'Выберите бренд'))
-    
-    # Динамически заполняем модели при выборе бренда
-    if request.method == 'GET' or not form.brand_id.data:
-        form.model_id.choices = [(0, 'Сначала выберите бренд')]
-    else:
-        brand_id = form.brand_id.data if form.brand_id.data else request.form.get('brand_id', 0)
-        if brand_id and int(brand_id) > 0:
-            form.model_id.choices = [(model.id, model.name) for model in 
-                                   CarModel.query.filter_by(brand_id=brand_id, is_active=True).all()]
-            form.model_id.choices.insert(0, (0, 'Выберите модель'))
-    
-    if request.method == 'POST' and form.validate_on_submit():
-        try:
-            # Автоматически определяем ценовую категорию
-            price_category = None
-            categories = PriceCategory.query.filter_by(is_active=True).all()
-            for category in categories:
-                if category.min_price_usd <= form.price_usd.data <= category.max_price_usd:
-                    price_category = category
-                    break
-            
-            car = Car(
-                title=form.title.data,
-                description=form.description.data,
-                price_usd=form.price_usd.data,
-                price_category_id=price_category.id if price_category else None,
-                brand_id=form.brand_id.data,
-                model_id=form.model_id.data,
-                year=form.year.data,
-                mileage_km=form.mileage_km.data,
-                fuel_type=form.fuel_type.data,
-                transmission=form.transmission.data,
-                color=form.color.data,
-                engine_capacity=form.engine_capacity.data,
-                photo_url1=form.photo_url1.data,
-                photo_url2=form.photo_url2.data,
-                photo_url3=form.photo_url3.data,
-                photo_url4=form.photo_url4.data,
-                is_active=True
-            )
-            
-            db.session.add(car)
-            db.session.commit()
-            
-            flash('Автомобиль успешно добавлен!', 'success')
-            return redirect(url_for('admin.index'))
-            
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Ошибка при добавлении автомобиля: {str(e)}', 'danger')
-    
-    return render_template_string('''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Добавить автомобиль - Suvtekin Auto</title>
-        <style>
-            body { font-family: Arial; background: #f5f5f5; padding: 20px; }
-            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
-            h2 { color: #333; margin-bottom: 20px; }
-            .form-group { margin-bottom: 20px; }
-            label { display: block; margin-bottom: 5px; color: #555; font-weight: bold; }
-            input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
-            textarea { min-height: 100px; resize: vertical; }
-            .row { display: flex; gap: 15px; }
-            .col { flex: 1; }
-            .btn { background: #007bff; color: white; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-size: 16px; }
-            .btn:hover { background: #0056b3; }
-            .alert { padding: 10px; border-radius: 5px; margin-bottom: 20px; }
-            .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-            .alert-danger { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-            .back-link { display: inline-block; margin-top: 20px; color: #007bff; text-decoration: none; }
-            .back-link:hover { text-decoration: underline; }
-        </style>
-        <script>
-            function updateModels() {
-                var brandId = document.getElementById('brand_id').value;
-                if (brandId) {
-                    fetch('/get-models/' + brandId)
-                        .then(response => response.json())
-                        .then(data => {
-                            var modelSelect = document.getElementById('model_id');
-                            modelSelect.innerHTML = '';
-                            data.models.forEach(function(model) {
-                                var option = document.createElement('option');
-                                option.value = model[0];
-                                option.text = model[1];
-                                modelSelect.appendChild(option);
-                            });
-                        });
-                }
-            }
-        </script>
-    </head>
-    <body>
-        <div class="container">
-            <h2>🚗 Добавить новый автомобиль</h2>
-            
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-            
-            <form method="POST">
-                <div class="form-group">
-                    <label for="title">Название автомобиля *</label>
-                    <input type="text" id="title" name="title" required placeholder="Например: Toyota Camry 2020">
-                </div>
-                
-                <div class="form-group">
-                    <label for="description">Описание</label>
-                    <textarea id="description" name="description" placeholder="Опишите автомобиль..."></textarea>
-                </div>
-                
-                <div class="row">
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="price_usd">Цена в USD *</label>
-                            <input type="number" id="price_usd" name="price_usd" step="0.01" required>
-                        </div>
-                    </div>
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="year">Год выпуска</label>
-                            <input type="number" id="year" name="year" min="1990" max="2024">
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="row">
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="brand_id">Бренд *</label>
-                            <select id="brand_id" name="brand_id" onchange="updateModels()" required>
-                                {% for brand_id, brand_name in form.brand_id.choices %}
-                                    <option value="{{ brand_id }}" {% if brand_id == form.brand_id.data %}selected{% endif %}>{{ brand_name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="model_id">Модель *</label>
-                            <select id="model_id" name="model_id" required>
-                                {% for model_id, model_name in form.model_id.choices %}
-                                    <option value="{{ model_id }}" {% if model_id == form.model_id.data %}selected{% endif %}>{{ model_name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="row">
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="mileage_km">Пробег (км)</label>
-                            <input type="number" id="mileage_km" name="mileage_km">
-                        </div>
-                    </div>
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="fuel_type">Тип топлива</label>
-                            <select id="fuel_type" name="fuel_type">
-                                <option value="Бензин">Бензин</option>
-                                <option value="Дизель">Дизель</option>
-                                <option value="Электричество">Электричество</option>
-                                <option value="Гибрид">Гибрид</option>
-                                <option value="Газ">Газ</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="row">
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="transmission">Коробка передач</label>
-                            <select id="transmission" name="transmission">
-                                <option value="Автомат">Автомат</option>
-                                <option value="Механика">Механика</option>
-                                <option value="Вариатор">Вариатор</option>
-                                <option value="Робот">Робот</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="col">
-                        <div class="form-group">
-                            <label for="color">Цвет</label>
-                            <input type="text" id="color" name="color" placeholder="Например: Черный">
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="engine_capacity">Объем двигателя (л)</label>
-                    <input type="number" id="engine_capacity" name="engine_capacity" step="0.1" placeholder="Например: 2.0">
-                </div>
-                
-                <div class="form-group">
-                    <label>Фотографии (URL)</label>
-                    <input type="text" name="photo_url1" placeholder="Фото 1 URL">
-                    <input type="text" name="photo_url2" placeholder="Фото 2 URL" style="margin-top: 10px;">
-                    <input type="text" name="photo_url3" placeholder="Фото 3 URL" style="margin-top: 10px;">
-                    <input type="text" name="photo_url4" placeholder="Фото 4 URL" style="margin-top: 10px;">
-                </div>
-                
-                <button type="submit" class="btn">Добавить автомобиль</button>
-                <a href="/admin" class="back-link">← Вернуться в админку</a>
-            </form>
-        </div>
-    </body>
-    </html>
-    ''', form=form)
-
-# API для получения моделей по бренду
-@app.route('/get-models/<int:brand_id>')
-def get_models(brand_id):
-    models = CarModel.query.filter_by(brand_id=brand_id, is_active=True).all()
-    return jsonify({'models': [[model.id, model.name] for model in models]})
-
-# TELEGRAM БОТ НА ВЕБХУКАХ
+# TELEGRAM БОТ
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 # Словари для языков
@@ -1093,6 +867,7 @@ def send_message(chat_id, text, reply_markup=None, parse_mode='Markdown'):
         params['reply_markup'] = json.dumps(reply_markup)
     try:
         response = requests.post(url, params=params, timeout=10)
+        logger.info(f"Отправка сообщения: {response.status_code}")
         return response.json()
     except Exception as e:
         logger.error(f"Ошибка отправки сообщения: {e}")
@@ -1104,11 +879,13 @@ def send_photo(chat_id, photo_url, caption, reply_markup=None):
     if reply_markup:
         params['reply_markup'] = json.dumps(reply_markup)
     try:
-        requests.post(url, params=params, timeout=10)
+        response = requests.post(url, params=params, timeout=10)
+        logger.info(f"Отправка фото: {response.status_code}")
+        return response.json()
     except Exception as e:
         logger.error(f"Ошибка отправки фото: {e}")
+        return None
 
-# Меню выбора языка
 def get_language_menu():
     return {
         'keyboard': [
@@ -1118,7 +895,6 @@ def get_language_menu():
         'one_time_keyboard': True
     }
 
-# Главное меню
 def get_main_menu(chat_id):
     keyboard = [
         [t(chat_id, 'show_cars'), t(chat_id, 'price_categories')],
@@ -1131,7 +907,6 @@ def get_main_menu(chat_id):
         'one_time_keyboard': False
     }
 
-# Меню отмены
 def get_cancel_menu(chat_id):
     return {
         'keyboard': [[t(chat_id, 'cancel')]],
@@ -1139,7 +914,6 @@ def get_cancel_menu(chat_id):
         'one_time_keyboard': True
     }
 
-# Кнопка заказа
 def get_order_button(chat_id, car_id):
     return {
         'inline_keyboard': [[
@@ -1152,6 +926,7 @@ def get_order_button(chat_id, car_id):
 def telegram_webhook():
     try:
         update = request.get_json()
+        logger.info(f"Получен вебхук: {update}")
         
         if 'callback_query' in update:
             handle_callback(update['callback_query'])
@@ -1167,6 +942,10 @@ def handle_callback(callback_query):
     try:
         data = callback_query['data']
         chat_id = callback_query['message']['chat']['id']
+        username = callback_query['from'].get('username', '')
+        first_name = callback_query['from'].get('first_name', '')
+        
+        logger.info(f"Callback: {data} от {chat_id}")
         
         if data == 'back_menu':
             send_message(chat_id, t(chat_id, 'main_menu'), get_main_menu(chat_id))
@@ -1189,108 +968,112 @@ def handle_callback(callback_query):
         send_message(chat_id, t(chat_id, 'error'), get_main_menu(chat_id))
 
 def handle_message(message):
-    chat_id = message['chat']['id']
-    text = message.get('text', '')
-    username = message['chat'].get('username', '')
-    first_name = message['chat'].get('first_name', '')
-    
-    # Проверяем выбран ли язык
-    if chat_id not in user_languages:
-        if text in ['🇷🇺 Русский', 'Русский', 'RU', 'ru']:
-            handle_language_selection(chat_id, 'ru')
-        elif text in ['🇺🇿 O\'zbek', 'O\'zbek', 'UZ', 'uz']:
-            handle_language_selection(chat_id, 'uz')
-        else:
+    try:
+        chat_id = message['chat']['id']
+        text = message.get('text', '')
+        username = message['chat'].get('username', '')
+        first_name = message['chat'].get('first_name', '')
+        
+        logger.info(f"Сообщение от {chat_id}: {text}")
+        
+        # Проверяем выбран ли язык
+        if chat_id not in user_languages:
+            if text in ['🇷🇺 Русский', 'Русский', 'RU', 'ru', '/start']:
+                handle_language_selection(chat_id, 'ru')
+            elif text in ['🇺🇿 O\'zbek', 'O\'zbek', 'UZ', 'uz']:
+                handle_language_selection(chat_id, 'uz')
+            else:
+                handle_start(chat_id, first_name)
+            return
+        
+        # Получаем состояние пользователя
+        state = user_states.get(chat_id, {})
+        action = state.get('action')
+        
+        # Отмена
+        if text == t(chat_id, 'cancel'):
+            user_states.pop(chat_id, None)
+            user_data.pop(chat_id, None)
+            send_message(chat_id, t(chat_id, 'main_menu'), get_main_menu(chat_id))
+            return
+        
+        # Обработка процесса продажи
+        if action == 'sell_car':
+            step = state.get('step')
+            data = user_data.get(chat_id, {})
+            
+            if step == 'brand_other':
+                data['brand'] = text
+                user_states[chat_id]['step'] = 'model'
+                send_message(chat_id, t(chat_id, 'sell_car_model'), get_cancel_menu(chat_id))
+            
+            elif step == 'model':
+                data['model'] = text
+                user_states[chat_id]['step'] = 'year'
+                send_message(chat_id, t(chat_id, 'sell_car_year'), get_cancel_menu(chat_id))
+            
+            elif step == 'year':
+                try:
+                    data['year'] = int(text)
+                    user_states[chat_id]['step'] = 'mileage'
+                    send_message(chat_id, t(chat_id, 'sell_car_mileage'), get_cancel_menu(chat_id))
+                except:
+                    send_message(chat_id, "Пожалуйста, введите правильный год (например: 2020)")
+            
+            elif step == 'mileage':
+                try:
+                    data['mileage'] = int(text)
+                    user_states[chat_id]['step'] = 'price'
+                    send_message(chat_id, t(chat_id, 'sell_car_price'), get_cancel_menu(chat_id))
+                except:
+                    send_message(chat_id, "Пожалуйста, введите правильный пробег (например: 50000)")
+            
+            elif step == 'price':
+                try:
+                    data['price'] = float(text)
+                    user_states[chat_id]['step'] = 'description'
+                    send_message(chat_id, t(chat_id, 'sell_car_description'), get_cancel_menu(chat_id))
+                except:
+                    send_message(chat_id, "Пожалуйста, введите правильную цену (например: 15000)")
+            
+            elif step == 'description':
+                data['description'] = text
+                user_states[chat_id]['step'] = 'phone'
+                send_message(chat_id, t(chat_id, 'sell_car_phone'), get_cancel_menu(chat_id))
+            
+            elif step == 'phone':
+                data['phone'] = text
+                complete_sell(chat_id, username, first_name)
+            
+            user_data[chat_id] = data
+            return
+        
+        # Обработка заказа с телефоном
+        elif action == 'order':
+            car_id = state.get('car_id')
+            if car_id:
+                complete_order(chat_id, car_id, text, username, first_name)
+            return
+        
+        # Обработка команд
+        if text == '/start':
             handle_start(chat_id, first_name)
-        return
-    
-    # Получаем состояние пользователя
-    state = user_states.get(chat_id, {})
-    action = state.get('action')
-    
-    # Обработка команды /start
-    if text == '/start':
-        handle_start(chat_id, first_name)
-        return
-    
-    # Отмена
-    if text == t(chat_id, 'cancel'):
-        user_states.pop(chat_id, None)
-        user_data.pop(chat_id, None)
-        send_message(chat_id, t(chat_id, 'main_menu'), get_main_menu(chat_id))
-        return
-    
-    # Обработка процесса продажи
-    if action == 'sell_car':
-        step = state.get('step')
-        data = user_data.get(chat_id, {})
-        
-        if step == 'brand_other':
-            data['brand'] = text
-            user_states[chat_id]['step'] = 'model'
-            send_message(chat_id, t(chat_id, 'sell_car_model'), get_cancel_menu(chat_id))
-        
-        elif step == 'model':
-            data['model'] = text
-            user_states[chat_id]['step'] = 'year'
-            send_message(chat_id, t(chat_id, 'sell_car_year'), get_cancel_menu(chat_id))
-        
-        elif step == 'year':
-            try:
-                data['year'] = int(text)
-                user_states[chat_id]['step'] = 'mileage'
-                send_message(chat_id, t(chat_id, 'sell_car_mileage'), get_cancel_menu(chat_id))
-            except:
-                send_message(chat_id, "Пожалуйста, введите правильный год (например: 2020)")
-        
-        elif step == 'mileage':
-            try:
-                data['mileage'] = int(text)
-                user_states[chat_id]['step'] = 'price'
-                send_message(chat_id, t(chat_id, 'sell_car_price'), get_cancel_menu(chat_id))
-            except:
-                send_message(chat_id, "Пожалуйста, введите правильный пробег (например: 50000)")
-        
-        elif step == 'price':
-            try:
-                data['price'] = float(text)
-                user_states[chat_id]['step'] = 'description'
-                send_message(chat_id, t(chat_id, 'sell_car_description'), get_cancel_menu(chat_id))
-            except:
-                send_message(chat_id, "Пожалуйста, введите правильную цену (например: 15000)")
-        
-        elif step == 'description':
-            data['description'] = text
-            user_states[chat_id]['step'] = 'phone'
-            send_message(chat_id, t(chat_id, 'sell_car_phone'), get_cancel_menu(chat_id))
-        
-        elif step == 'phone':
-            data['phone'] = text
-            complete_sell(chat_id, username, first_name)
-        
-        user_data[chat_id] = data
-        return
-    
-    # Обработка заказа с телефоном
-    elif action == 'order':
-        car_id = state.get('car_id')
-        if car_id:
-            complete_order(chat_id, car_id, text, username, first_name)
-        return
-    
-    # Обработка команд
-    if text == '/help' or text == t(chat_id, 'help_btn'):
-        send_message(chat_id, t(chat_id, 'help'), get_main_menu(chat_id))
-    elif text == t(chat_id, 'show_cars'):
-        show_cars(chat_id)
-    elif text == t(chat_id, 'price_categories'):
-        send_message(chat_id, t(chat_id, 'choose_category'), get_category_menu(chat_id))
-    elif text == t(chat_id, 'contact_manager'):
-        show_managers(chat_id)
-    elif text == t(chat_id, 'sell_car'):
-        start_sell_car(chat_id)
-    elif text.startswith('/'):
-        send_message(chat_id, t(chat_id, 'help'), get_main_menu(chat_id))
+        elif text == '/help' or text == t(chat_id, 'help_btn'):
+            send_message(chat_id, t(chat_id, 'help'), get_main_menu(chat_id))
+        elif text == t(chat_id, 'show_cars'):
+            show_cars(chat_id)
+        elif text == t(chat_id, 'price_categories'):
+            send_message(chat_id, t(chat_id, 'choose_category'), get_category_menu(chat_id))
+        elif text == t(chat_id, 'contact_manager'):
+            show_managers(chat_id)
+        elif text == t(chat_id, 'sell_car'):
+            start_sell_car(chat_id)
+        elif text.startswith('/'):
+            send_message(chat_id, t(chat_id, 'help'), get_main_menu(chat_id))
+            
+    except Exception as e:
+        logger.error(f"Ошибка обработки сообщения: {e}")
+        send_message(chat_id, t(chat_id, 'error'), get_main_menu(chat_id))
 
 def handle_start(chat_id, first_name):
     user_languages.pop(chat_id, None)
@@ -1305,48 +1088,52 @@ def handle_language_selection(chat_id, language):
     send_message(chat_id, TEXTS[language]['welcome'], get_main_menu(chat_id))
 
 def show_cars(chat_id, filter_type=None, filter_id=None):
-    with app.app_context():
-        query = Car.query.filter_by(is_active=True)
-        
-        if filter_type == 'category' and filter_id:
-            category = PriceCategory.query.get(filter_id)
-            if category:
-                query = query.filter(
-                    Car.price_usd >= category.min_price_usd,
-                    Car.price_usd <= category.max_price_usd
+    try:
+        with app.app_context():
+            query = Car.query.filter_by(is_active=True)
+            
+            if filter_type == 'category' and filter_id:
+                category = PriceCategory.query.get(filter_id)
+                if category:
+                    query = query.filter(
+                        Car.price_usd >= category.min_price_usd,
+                        Car.price_usd <= category.max_price_usd
+                    )
+            
+            cars = query.limit(5).all()
+            
+            if not cars:
+                send_message(chat_id, t(chat_id, 'no_cars'), get_main_menu(chat_id))
+                return
+            
+            for car in cars:
+                brand_name = car.brand.name if car.brand else ""
+                model_name = car.model.name if car.model else ""
+                full_brand = f"{brand_name} {model_name}".strip()
+                
+                caption = t(chat_id, 'car_info').format(
+                    title=car.title,
+                    price=car.price_usd,
+                    mileage=car.mileage_km,
+                    brand=full_brand,
+                    year=car.year,
+                    fuel=car.fuel_type,
+                    transmission=car.transmission,
+                    color=car.color,
+                    engine=car.engine_capacity,
+                    description=car.description or ''
                 )
-        
-        cars = query.limit(5).all()
-        
-        if not cars:
-            send_message(chat_id, t(chat_id, 'no_cars'), get_main_menu(chat_id))
-            return
-        
-        for car in cars:
-            brand_name = car.brand.name if car.brand else ""
-            model_name = car.model.name if car.model else ""
-            full_brand = f"{brand_name} {model_name}".strip()
-            
-            # Используем первое фото, если есть
-            photo_url = car.photo_url1 or car.photo_url2 or car.photo_url3 or car.photo_url4
-            
-            caption = t(chat_id, 'car_info').format(
-                title=car.title,
-                price=car.price_usd,
-                mileage=car.mileage_km,
-                brand=full_brand,
-                year=car.year,
-                fuel=car.fuel_type,
-                transmission=car.transmission,
-                color=car.color,
-                engine=car.engine_capacity,
-                description=car.description or ''
-            )
-            
-            if photo_url:
-                send_photo(chat_id, photo_url, caption, get_order_button(chat_id, car.id))
-            else:
-                send_message(chat_id, caption, get_order_button(chat_id, car.id))
+                
+                # Используем первое фото, если есть
+                photo_url = car.photo_url1 or 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80'
+                
+                if photo_url:
+                    send_photo(chat_id, photo_url, caption, get_order_button(chat_id, car.id))
+                else:
+                    send_message(chat_id, caption, get_order_button(chat_id, car.id))
+    except Exception as e:
+        logger.error(f"Ошибка показа авто: {e}")
+        send_message(chat_id, t(chat_id, 'error'), get_main_menu(chat_id))
 
 def get_category_menu(chat_id):
     with app.app_context():
@@ -1397,50 +1184,59 @@ def start_order(chat_id, car_id):
 
 def complete_order(chat_id, car_id, phone, username, first_name):
     with app.app_context():
-        car = Car.query.get(car_id)
-        if car:
-            order = Order(
-                car_id=car.id,
-                telegram_user_id=chat_id,
-                telegram_username=username,
-                telegram_first_name=first_name,
-                full_name=first_name,
-                phone=phone,
-                status='new'
-            )
-            db.session.add(order)
-            db.session.commit()
+        try:
+            car = Car.query.get(car_id)
+            if car:
+                order = Order(
+                    car_id=car.id,
+                    telegram_user_id=str(chat_id),
+                    telegram_username=username or '',
+                    telegram_first_name=first_name or '',
+                    full_name=first_name or '',
+                    phone=phone,
+                    status='new'
+                )
+                db.session.add(order)
+                db.session.commit()
+                
+                # Уведомление админу
+                admin_msg = f"📥 НОВЫЙ ЗАКАЗ!\n\nАвто: {car.title}\nЦена: ${car.price_usd:,.0f}\nКлиент: @{username or 'нет'}\nТелефон: {phone}\nID: {chat_id}"
+                if TELEGRAM_ADMIN_ID:
+                    send_message(TELEGRAM_ADMIN_ID, admin_msg)
             
-            # Уведомление админу
-            admin_msg = f"📥 НОВЫЙ ЗАКАЗ!\n\nАвто: {car.title}\nЦена: ${car.price_usd:,.0f}\nКлиент: @{username}\nТелефон: {phone}\nID: {chat_id}"
-            send_message(TELEGRAM_ADMIN_ID, admin_msg)
-        
-        send_message(chat_id, t(chat_id, 'order_success'), get_main_menu(chat_id))
-        user_states.pop(chat_id, None)
+            send_message(chat_id, t(chat_id, 'order_success'), get_main_menu(chat_id))
+            user_states.pop(chat_id, None)
+        except Exception as e:
+            logger.error(f"Ошибка создания заказа: {e}")
+            send_message(chat_id, t(chat_id, 'error'), get_main_menu(chat_id))
 
 def complete_sell(chat_id, username, first_name):
     data = user_data.get(chat_id, {})
     
     with app.app_context():
-        sell_request = SellRequest(
-            telegram_user_id=chat_id,
-            telegram_username=username,
-            telegram_first_name=first_name,
-            car_brand=data.get('brand', ''),
-            car_model=data.get('model', ''),
-            car_year=data.get('year'),
-            car_mileage=data.get('mileage'),
-            car_price=data.get('price'),
-            car_description=data.get('description', ''),
-            phone=data.get('phone', ''),
-            status='new'
-        )
-        db.session.add(sell_request)
-        db.session.commit()
-        
-        # Уведомление админу
-        admin_msg = f"💰 НОВАЯ ЗАЯВКА НА ПРОДАЖУ!\n\nМарка: {data.get('brand', '')}\nМодель: {data.get('model', '')}\nГод: {data.get('year', '')}\nПробег: {data.get('mileage', '')} км\nЦена: ${data.get('price', 0):,.0f}\nТелефон: {data.get('phone', '')}\nКлиент: @{username}\nID: {chat_id}"
-        send_message(TELEGRAM_ADMIN_ID, admin_msg)
+        try:
+            sell_request = SellRequest(
+                telegram_user_id=str(chat_id),
+                telegram_username=username or '',
+                telegram_first_name=first_name or '',
+                car_brand=data.get('brand', ''),
+                car_model=data.get('model', ''),
+                car_year=data.get('year'),
+                car_mileage=data.get('mileage'),
+                car_price=data.get('price'),
+                car_description=data.get('description', ''),
+                phone=data.get('phone', ''),
+                status='new'
+            )
+            db.session.add(sell_request)
+            db.session.commit()
+            
+            # Уведомление админу
+            admin_msg = f"💰 НОВАЯ ЗАЯВКА НА ПРОДАЖУ!\n\nМарка: {data.get('brand', '')}\nМодель: {data.get('model', '')}\nГод: {data.get('year', '')}\nПробег: {data.get('mileage', '')} км\nЦена: ${data.get('price', 0):,.0f}\nТелефон: {data.get('phone', '')}\nКлиент: @{username or 'нет'}\nID: {chat_id}"
+            if TELEGRAM_ADMIN_ID:
+                send_message(TELEGRAM_ADMIN_ID, admin_msg)
+        except Exception as e:
+            logger.error(f"Ошибка создания заявки: {e}")
     
     send_message(chat_id, t(chat_id, 'sell_car_success'), get_main_menu(chat_id))
     user_states.pop(chat_id, None)
@@ -1450,7 +1246,9 @@ def complete_sell(chat_id, username, first_name):
 @app.before_first_request
 def setup_webhook():
     try:
+        # Получаем URL приложения на Render
         render_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://suvtekin.onrender.com')
+        
         webhook_url = f"{render_url}/webhook/{TELEGRAM_TOKEN}"
         
         # Устанавливаем вебхук
@@ -1458,6 +1256,7 @@ def setup_webhook():
         
         if response.status_code == 200:
             logger.info(f"✅ Вебхук установлен: {webhook_url}")
+            logger.info(f"🤖 Телеграм токен: {TELEGRAM_TOKEN}")
         else:
             logger.error(f"❌ Ошибка установки вебхука: {response.text}")
     except Exception as e:
@@ -1513,7 +1312,7 @@ def test():
         </div>
         
         <p><strong>Админка:</strong> <a href="/admin">/admin</a></p>
-        <p><strong>Добавить авто:</strong> <a href="/add-car">/add-car</a></p>
+        <p><strong>Добавить авто:</strong> <a href="/admin/add-car">/admin/add-car</a></p>
         <p><strong>Логин:</strong> muha</p>
         <p><strong>Пароль:</strong> muhamed</p>
         
@@ -1550,12 +1349,222 @@ def manual_setup_webhook():
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
+# HTML шаблон для добавления авто
+@app.context_processor
+def inject_template():
+    return dict(
+        add_car_template='''
+{% extends 'admin/master.html' %}
+{% block body %}
+<div class="container">
+    <h1>🚗 Добавить новый автомобиль</h1>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <form method="POST" action="{{ url_for('car.create_view') }}">
+        <div class="form-group">
+            <label for="title">Название автомобиля *</label>
+            <input type="text" class="form-control" id="title" name="title" required placeholder="Toyota Camry 2020">
+        </div>
+        
+        <div class="form-group">
+            <label for="description">Описание</label>
+            <textarea class="form-control" id="description" name="description" rows="3" placeholder="Отличное состояние, полная комплектация..."></textarea>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="price_usd">Цена ($) *</label>
+                    <input type="number" class="form-control" id="price_usd" name="price_usd" required step="0.01" placeholder="15000">
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="price_category">Категория цены</label>
+                    <select class="form-control" id="price_category" name="price_category">
+                        <option value="">-- Выберите категорию --</option>
+                        {% for category in price_categories %}
+                        <option value="{{ category.id }}">{{ category.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="brand">Бренд *</label>
+                    <select class="form-control" id="brand" name="brand" required onchange="loadModels(this.value)">
+                        <option value="">-- Выберите бренд --</option>
+                        {% for brand in brands %}
+                        <option value="{{ brand.id }}">{{ brand.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="model">Модель *</label>
+                    <select class="form-control" id="model" name="model" required>
+                        <option value="">-- Сначала выберите бренд --</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="year">Год выпуска</label>
+                    <input type="number" class="form-control" id="year" name="year" min="1900" max="2024" placeholder="2020">
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="mileage_km">Пробег (км)</label>
+                    <input type="number" class="form-control" id="mileage_km" name="mileage_km" placeholder="50000">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="fuel_type">Тип топлива</label>
+                    <select class="form-control" id="fuel_type" name="fuel_type">
+                        <option value="">-- Выберите топливо --</option>
+                        <option value="Бензин">Бензин</option>
+                        <option value="Дизель">Дизель</option>
+                        <option value="Газ">Газ</option>
+                        <option value="Электричество">Электричество</option>
+                        <option value="Гибрид">Гибрид</option>
+                        <option value="Гибрид (бензин-электричество)">Гибрид (бензин-электричество)</option>
+                        <option value="Гибрид (дизель-электричество)">Гибрид (дизель-электричество)</option>
+                        <option value="Газ/бензин">Газ/бензин</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="transmission">Коробка передач</label>
+                    <select class="form-control" id="transmission" name="transmission">
+                        <option value="">-- Выберите КПП --</option>
+                        <option value="Автомат">Автомат</option>
+                        <option value="Механика">Механика</option>
+                        <option value="Вариатор">Вариатор</option>
+                        <option value="Робот">Робот</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="color">Цвет</label>
+                    <select class="form-control" id="color" name="color">
+                        <option value="">-- Выберите цвет --</option>
+                        <option value="Черный">Черный</option>
+                        <option value="Белый">Белый</option>
+                        <option value="Серый">Серый</option>
+                        <option value="Синий">Синий</option>
+                        <option value="Красный">Красный</option>
+                        <option value="Зеленый">Зеленый</option>
+                        <option value="Желтый">Желтый</option>
+                        <option value="Серебристый">Серебристый</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="engine_capacity">Объем двигателя (л)</label>
+                    <input type="number" class="form-control" id="engine_capacity" name="engine_capacity" step="0.1" placeholder="2.0">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url1">Фото 1 (URL) *</label>
+                    <input type="url" class="form-control" id="photo_url1" name="photo_url1" placeholder="https://example.com/photo1.jpg">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url2">Фото 2 (URL)</label>
+                    <input type="url" class="form-control" id="photo_url2" name="photo_url2" placeholder="https://example.com/photo2.jpg">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url3">Фото 3 (URL)</label>
+                    <input type="url" class="form-control" id="photo_url3" name="photo_url3" placeholder="https://example.com/photo3.jpg">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url4">Фото 4 (URL)</label>
+                    <input type="url" class="form-control" id="photo_url4" name="photo_url4" placeholder="https://example.com/photo4.jpg">
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
+            <label class="form-check-label" for="is_active">Активный</label>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Добавить автомобиль</button>
+        <a href="{{ url_for('admin.index') }}" class="btn btn-secondary">Назад</a>
+    </form>
+</div>
+
+<script>
+function loadModels(brandId) {
+    if (!brandId) {
+        document.getElementById('model').innerHTML = '<option value="">-- Сначала выберите бренд --</option>';
+        return;
+    }
+    
+    fetch('/api/models/' + brandId)
+        .then(response => response.json())
+        .then(data => {
+            const modelSelect = document.getElementById('model');
+            modelSelect.innerHTML = '<option value="">-- Выберите модель --</option>';
+            data.forEach(model => {
+                modelSelect.innerHTML += '<option value="' + model.id + '">' + model.name + '</option>';
+            });
+        })
+        .catch(error => {
+            console.error('Error loading models:', error);
+        });
+}
+</script>
+{% endblock %}
+        '''
+    )
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"🚀 Запуск Suvtekin Auto на порту {port}")
     logger.info(f"🌐 Адрес: http://localhost:{port}")
     logger.info(f"🔗 Админка: http://localhost:{port}/admin")
-    logger.info(f"🔗 Добавить авто: http://localhost:{port}/add-car")
+    logger.info(f"🔗 Добавить авто: http://localhost:{port}/admin/add-car")
     logger.info(f"🔑 Логин: muha, Пароль: muhamed")
     logger.info(f"🤖 Telegram бот: @suvtekinn_bot")
     
