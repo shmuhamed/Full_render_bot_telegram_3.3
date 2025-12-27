@@ -12,7 +12,6 @@ import json
 import requests
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
-import uuid
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -336,9 +335,207 @@ class AddCarView(BaseView):
             brands = Brand.query.filter_by(is_active=True).all()
             price_categories = PriceCategory.query.filter_by(is_active=True).all()
             
-        return self.render('admin/add_car.html', 
-                          brands=brands,
-                          price_categories=price_categories)
+        return render_template_string('''
+{% extends 'admin/master.html' %}
+{% block body %}
+<div class="container">
+    <h1>🚗 Добавить новый автомобиль</h1>
+    
+    <div class="alert alert-info">
+        <strong>Внимание!</strong> Эта форма добавляет авто напрямую в базу данных. 
+        Для полного управления используйте раздел "Автомобили" в меню.
+    </div>
+    
+    <form method="POST" action="{{ url_for('car.create_view') }}">
+        <div class="form-group">
+            <label for="title">Название автомобиля *</label>
+            <input type="text" class="form-control" id="title" name="title" required placeholder="Toyota Camry 2020">
+        </div>
+        
+        <div class="form-group">
+            <label for="description">Описание</label>
+            <textarea class="form-control" id="description" name="description" rows="3" placeholder="Отличное состояние, полная комплектация..."></textarea>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="price_usd">Цена ($) *</label>
+                    <input type="number" class="form-control" id="price_usd" name="price_usd" required step="0.01" placeholder="15000">
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="price_category">Категория цены</label>
+                    <select class="form-control" id="price_category" name="price_category">
+                        <option value="">-- Выберите категорию --</option>
+                        {% for category in price_categories %}
+                        <option value="{{ category.id }}">{{ category.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="brand">Бренд *</label>
+                    <select class="form-control" id="brand" name="brand" required onchange="loadModels(this.value)">
+                        <option value="">-- Выберите бренд --</option>
+                        {% for brand in brands %}
+                        <option value="{{ brand.id }}">{{ brand.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="model">Модель *</label>
+                    <select class="form-control" id="model" name="model" required>
+                        <option value="">-- Сначала выберите бренд --</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="year">Год выпуска</label>
+                    <input type="number" class="form-control" id="year" name="year" min="1900" max="2024" placeholder="2020">
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="mileage_km">Пробег (км)</label>
+                    <input type="number" class="form-control" id="mileage_km" name="mileage_km" placeholder="50000">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="fuel_type">Тип топлива</label>
+                    <select class="form-control" id="fuel_type" name="fuel_type">
+                        <option value="">-- Выберите топливо --</option>
+                        <option value="Бензин">Бензин</option>
+                        <option value="Дизель">Дизель</option>
+                        <option value="Газ">Газ</option>
+                        <option value="Электричество">Электричество</option>
+                        <option value="Гибрид">Гибрид</option>
+                        <option value="Гибрид (бензин-электричество)">Гибрид (бензин-электричество)</option>
+                        <option value="Гибрид (дизель-электричество)">Гибрид (дизель-электричество)</option>
+                        <option value="Газ/бензин">Газ/бензин</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="transmission">Коробка передач</label>
+                    <select class="form-control" id="transmission" name="transmission">
+                        <option value="">-- Выберите КПП --</option>
+                        <option value="Автомат">Автомат</option>
+                        <option value="Механика">Механика</option>
+                        <option value="Вариатор">Вариатор</option>
+                        <option value="Робот">Робот</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="color">Цвет</label>
+                    <select class="form-control" id="color" name="color">
+                        <option value="">-- Выберите цвет --</option>
+                        <option value="Черный">Черный</option>
+                        <option value="Белый">Белый</option>
+                        <option value="Серый">Серый</option>
+                        <option value="Синий">Синий</option>
+                        <option value="Красный">Красный</option>
+                        <option value="Зеленый">Зеленый</option>
+                        <option value="Желтый">Желтый</option>
+                        <option value="Серебристый">Серебристый</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="engine_capacity">Объем двигателя (л)</label>
+                    <input type="number" class="form-control" id="engine_capacity" name="engine_capacity" step="0.1" placeholder="2.0">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url1">Фото 1 (URL) *</label>
+                    <input type="url" class="form-control" id="photo_url1" name="photo_url1" placeholder="https://example.com/photo1.jpg">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url2">Фото 2 (URL)</label>
+                    <input type="url" class="form-control" id="photo_url2" name="photo_url2" placeholder="https://example.com/photo2.jpg">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url3">Фото 3 (URL)</label>
+                    <input type="url" class="form-control" id="photo_url3" name="photo_url3" placeholder="https://example.com/photo3.jpg">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="photo_url4">Фото 4 (URL)</label>
+                    <input type="url" class="form-control" id="photo_url4" name="photo_url4" placeholder="https://example.com/photo4.jpg">
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
+            <label class="form-check-label" for="is_active">Активный</label>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Добавить автомобиль</button>
+        <a href="{{ url_for('admin.index') }}" class="btn btn-secondary">Назад</a>
+    </form>
+</div>
+
+<script>
+function loadModels(brandId) {
+    if (!brandId) {
+        document.getElementById('model').innerHTML = '<option value="">-- Сначала выберите бренд --</option>';
+        return;
+    }
+    
+    fetch('/api/models/' + brandId)
+        .then(response => response.json())
+        .then(data => {
+            const modelSelect = document.getElementById('model');
+            modelSelect.innerHTML = '<option value="">-- Выберите модель --</option>';
+            data.forEach(model => {
+                modelSelect.innerHTML += '<option value="' + model.id + '">' + model.name + '</option>';
+            });
+        })
+        .catch(error => {
+            console.error('Error loading models:', error);
+        });
+}
+</script>
+{% endblock %}
+        ''', brands=brands, price_categories=price_categories)
 
 # ИСПРАВЛЕННЫЕ ModelView для админки
 class CarModelView(ModelView):
@@ -1242,25 +1439,28 @@ def complete_sell(chat_id, username, first_name):
     user_states.pop(chat_id, None)
     user_data.pop(chat_id, None)
 
-# Настройка вебхука при запуске
-@app.before_first_request
-def setup_webhook():
-    try:
-        # Получаем URL приложения на Render
-        render_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://suvtekin.onrender.com')
-        
-        webhook_url = f"{render_url}/webhook/{TELEGRAM_TOKEN}"
-        
-        # Устанавливаем вебхук
-        response = requests.get(f"{BASE_URL}/setWebhook?url={webhook_url}")
-        
-        if response.status_code == 200:
-            logger.info(f"✅ Вебхук установлен: {webhook_url}")
-            logger.info(f"🤖 Телеграм токен: {TELEGRAM_TOKEN}")
-        else:
-            logger.error(f"❌ Ошибка установки вебхука: {response.text}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка настройки вебхука: {e}")
+# Функция для настройки вебхука
+def setup_webhook_on_startup():
+    with app.app_context():
+        try:
+            # Получаем URL приложения на Render
+            render_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://suvtekin.onrender.com')
+            
+            webhook_url = f"{render_url}/webhook/{TELEGRAM_TOKEN}"
+            
+            # Устанавливаем вебхук
+            response = requests.get(f"{BASE_URL}/setWebhook?url={webhook_url}")
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Вебхук установлен: {webhook_url}")
+                logger.info(f"🤖 Телеграм токен: {TELEGRAM_TOKEN}")
+            else:
+                logger.error(f"❌ Ошибка установки вебхука: {response.text}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка настройки вебхука: {e}")
+
+# Запускаем настройку вебхука при старте
+setup_webhook_on_startup()
 
 # Страница проверки
 @app.route('/test')
@@ -1348,216 +1548,6 @@ def manual_setup_webhook():
             return f"❌ Ошибка установки вебхука: {response.text}"
     except Exception as e:
         return f"❌ Ошибка: {e}"
-
-# HTML шаблон для добавления авто
-@app.context_processor
-def inject_template():
-    return dict(
-        add_car_template='''
-{% extends 'admin/master.html' %}
-{% block body %}
-<div class="container">
-    <h1>🚗 Добавить новый автомобиль</h1>
-    
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-    
-    <form method="POST" action="{{ url_for('car.create_view') }}">
-        <div class="form-group">
-            <label for="title">Название автомобиля *</label>
-            <input type="text" class="form-control" id="title" name="title" required placeholder="Toyota Camry 2020">
-        </div>
-        
-        <div class="form-group">
-            <label for="description">Описание</label>
-            <textarea class="form-control" id="description" name="description" rows="3" placeholder="Отличное состояние, полная комплектация..."></textarea>
-        </div>
-        
-        <div class="row">
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="price_usd">Цена ($) *</label>
-                    <input type="number" class="form-control" id="price_usd" name="price_usd" required step="0.01" placeholder="15000">
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="price_category">Категория цены</label>
-                    <select class="form-control" id="price_category" name="price_category">
-                        <option value="">-- Выберите категорию --</option>
-                        {% for category in price_categories %}
-                        <option value="{{ category.id }}">{{ category.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="brand">Бренд *</label>
-                    <select class="form-control" id="brand" name="brand" required onchange="loadModels(this.value)">
-                        <option value="">-- Выберите бренд --</option>
-                        {% for brand in brands %}
-                        <option value="{{ brand.id }}">{{ brand.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-        </div>
-        
-        <div class="row">
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="model">Модель *</label>
-                    <select class="form-control" id="model" name="model" required>
-                        <option value="">-- Сначала выберите бренд --</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="year">Год выпуска</label>
-                    <input type="number" class="form-control" id="year" name="year" min="1900" max="2024" placeholder="2020">
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="mileage_km">Пробег (км)</label>
-                    <input type="number" class="form-control" id="mileage_km" name="mileage_km" placeholder="50000">
-                </div>
-            </div>
-        </div>
-        
-        <div class="row">
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="fuel_type">Тип топлива</label>
-                    <select class="form-control" id="fuel_type" name="fuel_type">
-                        <option value="">-- Выберите топливо --</option>
-                        <option value="Бензин">Бензин</option>
-                        <option value="Дизель">Дизель</option>
-                        <option value="Газ">Газ</option>
-                        <option value="Электричество">Электричество</option>
-                        <option value="Гибрид">Гибрид</option>
-                        <option value="Гибрид (бензин-электричество)">Гибрид (бензин-электричество)</option>
-                        <option value="Гибрид (дизель-электричество)">Гибрид (дизель-электричество)</option>
-                        <option value="Газ/бензин">Газ/бензин</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="transmission">Коробка передач</label>
-                    <select class="form-control" id="transmission" name="transmission">
-                        <option value="">-- Выберите КПП --</option>
-                        <option value="Автомат">Автомат</option>
-                        <option value="Механика">Механика</option>
-                        <option value="Вариатор">Вариатор</option>
-                        <option value="Робот">Робот</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="color">Цвет</label>
-                    <select class="form-control" id="color" name="color">
-                        <option value="">-- Выберите цвет --</option>
-                        <option value="Черный">Черный</option>
-                        <option value="Белый">Белый</option>
-                        <option value="Серый">Серый</option>
-                        <option value="Синий">Синий</option>
-                        <option value="Красный">Красный</option>
-                        <option value="Зеленый">Зеленый</option>
-                        <option value="Желтый">Желтый</option>
-                        <option value="Серебристый">Серебристый</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-        
-        <div class="row">
-            <div class="col-md-4">
-                <div class="form-group">
-                    <label for="engine_capacity">Объем двигателя (л)</label>
-                    <input type="number" class="form-control" id="engine_capacity" name="engine_capacity" step="0.1" placeholder="2.0">
-                </div>
-            </div>
-        </div>
-        
-        <div class="row">
-            <div class="col-md-6">
-                <div class="form-group">
-                    <label for="photo_url1">Фото 1 (URL) *</label>
-                    <input type="url" class="form-control" id="photo_url1" name="photo_url1" placeholder="https://example.com/photo1.jpg">
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="form-group">
-                    <label for="photo_url2">Фото 2 (URL)</label>
-                    <input type="url" class="form-control" id="photo_url2" name="photo_url2" placeholder="https://example.com/photo2.jpg">
-                </div>
-            </div>
-        </div>
-        
-        <div class="row">
-            <div class="col-md-6">
-                <div class="form-group">
-                    <label for="photo_url3">Фото 3 (URL)</label>
-                    <input type="url" class="form-control" id="photo_url3" name="photo_url3" placeholder="https://example.com/photo3.jpg">
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="form-group">
-                    <label for="photo_url4">Фото 4 (URL)</label>
-                    <input type="url" class="form-control" id="photo_url4" name="photo_url4" placeholder="https://example.com/photo4.jpg">
-                </div>
-            </div>
-        </div>
-        
-        <div class="form-group form-check">
-            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
-            <label class="form-check-label" for="is_active">Активный</label>
-        </div>
-        
-        <button type="submit" class="btn btn-primary">Добавить автомобиль</button>
-        <a href="{{ url_for('admin.index') }}" class="btn btn-secondary">Назад</a>
-    </form>
-</div>
-
-<script>
-function loadModels(brandId) {
-    if (!brandId) {
-        document.getElementById('model').innerHTML = '<option value="">-- Сначала выберите бренд --</option>';
-        return;
-    }
-    
-    fetch('/api/models/' + brandId)
-        .then(response => response.json())
-        .then(data => {
-            const modelSelect = document.getElementById('model');
-            modelSelect.innerHTML = '<option value="">-- Выберите модель --</option>';
-            data.forEach(model => {
-                modelSelect.innerHTML += '<option value="' + model.id + '">' + model.name + '</option>';
-            });
-        })
-        .catch(error => {
-            console.error('Error loading models:', error);
-        });
-}
-</script>
-{% endblock %}
-        '''
-    )
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
